@@ -1,0 +1,43 @@
+name: Terraform validate
+
+on:
+  workflow_call:
+    inputs:
+      terraform_version:
+        type: string
+        required: false
+        default: "1.9.8"
+      working_directory:
+        type: string
+        required: false
+        default: "."
+    outputs:
+      validation_result:
+        description: Terraform validation result
+        value: ${{ jobs.validate.outputs.result }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.validation.outputs.result }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+      - name: Terraform format
+        run: terraform fmt -check -recursive
+      - name: Terraform init
+        run: terraform init -backend=false -input=false
+      - name: Terraform validate
+        id: validation
+        run: |
+          terraform validate
+          echo "result=success" >> "$GITHUB_OUTPUT"
