@@ -35,4 +35,4 @@ jobs:
       - name: Terraform plan
         env:
           TF_VAR_project_id: ${{ secrets.TF_VAR_project_id }}
-      - run: terraform plan -input=false -no-color
+        run: terraform plan -input=false -no-color
