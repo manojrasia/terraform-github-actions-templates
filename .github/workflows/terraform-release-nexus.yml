@@ -1,0 +1,92 @@
+name: Terraform module release to Nexus
+
+on:
+  workflow_call:
+    inputs:
+      module_name:
+        description: Terraform module artifact name
+        required: true
+        type: string
+      version:
+        description: Release version without v prefix; empty derives it from the tag
+        required: false
+        type: string
+        default: ""
+      terraform_version:
+        required: false
+        type: string
+        default: "1.9.8"
+      working_directory:
+        required: false
+        type: string
+        default: "."
+      nexus_repository:
+        required: true
+        type: string
+    secrets:
+      NEXUS_URL:
+        required: true
+      NEXUS_USERNAME:
+        required: true
+      NEXUS_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: [self-hosted, linux, nexus-local]
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+      - name: Resolve release version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$INPUT_VERSION" ]]; then VERSION="$INPUT_VERSION"; elif [[ "$REF_TYPE" == "tag" ]]; then VERSION="${REF_NAME#v}"; else echo "Version is required for manual runs"; exit 1; fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid version: $VERSION"; exit 1; }
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Validate module
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+      - name: Package module
+        id: package
+        env:
+          MODULE_NAME: ${{ inputs.module_name }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          ARCHIVE="${MODULE_NAME}-${VERSION}.zip"
+          zip -j "$ARCHIVE" main.tf variables.tf outputs.tf README.md
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+      - name: Publish to Nexus
+        env:
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
+          NEXUS_REPOSITORY: ${{ inputs.nexus_repository }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          MODULE_NAME: ${{ inputs.module_name }}
+          VERSION: ${{ steps.version.outputs.value }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          BASE="${NEXUS_URL%/}/repository/${NEXUS_REPOSITORY}/${MODULE_NAME}/${VERSION}"
+          for FILE in "$ARCHIVE" "$ARCHIVE.sha256"; do
+            STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" --user "$NEXUS_USERNAME:$NEXUS_PASSWORD" "$BASE/$FILE" || true)
+            [[ "$STATUS" != "200" ]] || { echo "Refusing to overwrite $FILE"; exit 1; }
+          done
+          curl --fail --show-error --user "$NEXUS_USERNAME:$NEXUS_PASSWORD" --upload-file "$ARCHIVE" "$BASE/$ARCHIVE"
+          curl --fail --show-error --user "$NEXUS_USERNAME:$NEXUS_PASSWORD" --upload-file "$ARCHIVE.sha256" "$BASE/$ARCHIVE.sha256"
