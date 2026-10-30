@@ -1,0 +1,38 @@
+name: Terraform plan
+
+on:
+  workflow_call:
+    inputs:
+      terraform_version:
+        type: string
+        required: false
+        default: "1.9.8"
+      working_directory:
+        type: string
+        required: false
+        default: "."
+    secrets:
+      TF_VAR_project_id:
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+      - name: Terraform init
+        run: terraform init -input=false
+      - name: Terraform plan
+        env:
+          TF_VAR_project_id: ${{ secrets.TF_VAR_project_id }}
+      - run: terraform plan -input=false -no-color
