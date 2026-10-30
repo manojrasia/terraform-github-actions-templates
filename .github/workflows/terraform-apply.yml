@@ -1,0 +1,53 @@
+name: Terraform apply
+
+on:
+  workflow_call:
+    inputs:
+      terraform_version:
+        type: string
+        required: false
+        default: "1.9.8"
+      working_directory:
+        type: string
+        required: false
+        default: "."
+      auto_approve:
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: false
+      GCP_SERVICE_ACCOUNT:
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && secrets.GCP_SERVICE_ACCOUNT != '' }}
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+      - name: Terraform init
+        run: terraform init -input=false
+      - name: Terraform apply
+        run: |
+          if [[ "${{ inputs.auto_approve }}" == "true" ]]; then
+            terraform apply -input=false -auto-approve
+          else
+            terraform apply -input=false
+          fi
