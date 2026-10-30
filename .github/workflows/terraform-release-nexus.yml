@@ -61,15 +61,17 @@ jobs:
           terraform fmt -check -recursive
           terraform init -backend=false -input=false
           terraform validate
-      - name: Package module
+      - name: Package Terraform module files only
         id: package
         env:
           MODULE_NAME: ${{ inputs.module_name }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
+          mapfile -t TF_FILES < <(find . -maxdepth 1 -type f -name '*.tf' -printf '%f\n' | sort)
+          (("${#TF_FILES[@]}" > 0)) || { echo "No root Terraform module .tf files found"; exit 1; }
           ARCHIVE="${MODULE_NAME}-${VERSION}.zip"
-          zip -j "$ARCHIVE" main.tf variables.tf outputs.tf README.md
+          zip -j "$ARCHIVE" "${TF_FILES[@]}"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
       - name: Publish to Nexus
